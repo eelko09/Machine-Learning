@@ -24,10 +24,10 @@ def main():
     parser.add_argument("--min_samples_leaf", type=int, default=1, help="The minimum number of samples required to be at a leaf node.")
     parser.add_argument("--bootstrap", type=bool, default=True, help="Whether bootstrap samples are used when building trees.")
     parser.add_argument("--criterion", type=str, default='gini', help="The function to measure the quality of a split. Supported criteria are “gini” for the Gini impurity and “log_loss” and “entropy” both for the Shannon information gain.")
-    parser.add_argument("--random_hyperparameter_tuning", type=bool, default=False, help="Whether to conduct random hyperparameter tuning and rerun with tuned random forest")
-    parser.add_argument("--grid_hyperparameter_tuning", type=bool, default=False, help="Whether to conduct grid hyperparameter tuning and rerun with tuned random forest")
-    parser.add_argument("--manual_params", type=bool, default=False, help="Whether to fit random forest using user specified parameters")
-    
+    parser.add_argument("--random_hyperparameter_tuning", type=bool, default=False, help="Whether to conduct random hyperparameter tuning and rerun with tuned random forest.")
+    parser.add_argument("--grid_hyperparameter_tuning", type=bool, default=False, help="Whether to conduct grid hyperparameter tuning and rerun with tuned random forest.")
+    parser.add_argument("--manual_params", type=bool, default=False, help="Whether to fit random forest using user specified parameters.")
+    parser.add_argument("--permutation_impt", type=bool, default=False, help="Whether to run permutation importance calculations.")
     args = parser.parse_args()
     
     # Load and preprocess data
@@ -35,21 +35,21 @@ def main():
     
     # Train and evaluate base model
     rf_base = RandomForestClassifier(random_state=1, n_jobs=-1)
-    train_and_evaluate_model(rf_base, train_features, train_labels, test_features, test_labels, feature_list, 'base')
+    train_and_evaluate_model(rf_base, train_features, train_labels, test_features, test_labels, feature_list, 'base',args.permutation_impt)
 
     if args.random_hyperparameter_tuning:
         random_grid = create_random_grid()
         rf_random = perform_hyperparameter_tuning(
             RandomizedSearchCV, random_grid, train_features, train_labels, 'randomizedSearch_bestParams.tsv'
         )
-        train_and_evaluate_model(rf_random, train_features, train_labels, test_features, test_labels, feature_list, 'random')
+        train_and_evaluate_model(rf_random, train_features, train_labels, test_features, test_labels, feature_list, 'random',args.permutation_impt)
 
     if args.grid_hyperparameter_tuning:
         grid = create_grid()
         rf_grid = perform_hyperparameter_tuning(
             GridSearchCV, grid, train_features, train_labels, 'gridSearch_bestParams.tsv'
         )
-        train_and_evaluate_model(rf_grid, train_features, train_labels, test_features, test_labels, feature_list, 'grid')
+        train_and_evaluate_model(rf_grid, train_features, train_labels, test_features, test_labels, feature_list, 'grid',args.permutation_impt)
 
     if args.manual_params:
         if args.max_features.replace('.','').isnumeric():
@@ -59,7 +59,7 @@ def main():
             min_samples_leaf=args.min_samples_leaf, max_features=args.max_features, max_depth=args.max_depth,
             criterion=args.criterion, bootstrap=args.bootstrap
         )
-        train_and_evaluate_model(rf_manual, train_features, train_labels, test_features, test_labels, feature_list, 'manual')
+        train_and_evaluate_model(rf_manual, train_features, train_labels, test_features, test_labels, feature_list, 'manual',args.permutation_impt)
 
 ###------------------->>> End of main()
 
@@ -76,7 +76,7 @@ def load_and_preprocess_data(args):
         feature_list = zdf.columns.tolist()
 
         train_features, test_features, train_labels, test_labels = train_test_split(
-            features, labels, test_size=0.25,random_state=1, stratify=labels
+            features, labels, test_size=0.25, random_state=1, stratify=labels
         )
         return zdf, feature_list, train_features, test_features, train_labels, test_labels
     except Exception as e:
@@ -127,7 +127,7 @@ def perform_hyperparameter_tuning(search_method, param_grid, train_features, tra
         n_jobs=-1
     )
 
-def train_and_evaluate_model(model, train_features, train_labels, test_features, test_labels, feature_list, prefix):
+def train_and_evaluate_model(model, train_features, train_labels, test_features, test_labels, feature_list, prefix, calc_permutation_impt):
     """ Train and evaluate the model. Save results with the specified prefix. """
     model.fit(train_features, train_labels)
     predictions = model.predict(test_features)
@@ -148,6 +148,11 @@ def train_and_evaluate_model(model, train_features, train_labels, test_features,
     
     feature_importances_df = pd.DataFrame(feature_importances, columns=['Feature', 'Importance'])
     feature_importances_df.to_csv(f'feature_importances_{prefix}.tsv', sep='\t', index=False)
+    
+    if permutation_importance:
+        result = permutation_importance(model, test_features, test_labels, n_repeats=10, random_state=1, n_jobs=-1)
+        forest_importances = pd.Series(result.importances_mean, index=feature_list)
+        forest_importances.to_csv(f"feature_permutation_importances_{prefix}.tsv", sep='\t')
 
 def create_confusion_matrix(y_test, y_pred_test, outName):
     """ Create and save a confusion matrix. """
@@ -166,6 +171,5 @@ def create_confusion_matrix(y_test, y_pred_test, outName):
     plt.savefig(outName)
 
 ###------------->>>
-
 if __name__ == "__main__":
     main()
